@@ -62,7 +62,7 @@ class EnhancedAIManager:
     def _initialize_providers(self):
         """Inicializa todos os provedores de IA"""
 
-        # OpenRouter com rotação de 4 APIs (Prioridade 1 - mais confiável)
+        # OpenRouter X-AI Grok-4-Fast:free (Prioridade 1 - PRIMÁRIA)
         if HAS_OPENROUTER:
             openrouter_keys = [
                 os.getenv("OPENROUTER_API_KEY"),
@@ -83,20 +83,58 @@ class EnhancedAIManager:
                         )
                         openrouter_clients.append(client)
                     
-                    self.providers["openrouter"] = {
+                    self.providers["openrouter_grok"] = {
                         "clients": openrouter_clients,  # Lista de clientes
                         "current_client_index": 0,  # Índice atual
-                        "model": "anthropic/claude-3.5-sonnet-20241022",  # Modelo com 200k context
-                        "available": True,  # Reabilitado com rotação
-                        "supports_tools": False,
-                        "priority": 1,
-                        "total_keys": len(openrouter_keys)
+                        "model": "x-ai/grok-4-fast:free",  # X-AI Grok-4-Fast FREE como primária
+                        "available": True,  # Habilitado como primária
+                        "supports_tools": True,
+                        "priority": 1,  # PRIORIDADE MÁXIMA
+                        "total_keys": len(openrouter_keys),
+                        "max_tokens": None,  # SEM LIMITAÇÃO DE TOKENS
+                        "description": "X-AI Grok-4-Fast FREE - IA Primária"
                     }
-                    logger.info(f"✅ OpenRouter configurado com {len(openrouter_keys)} chaves API")
+                    logger.info(f"✅ OpenRouter X-AI Grok-4-Fast:free configurado como PRIMÁRIA com {len(openrouter_keys)} chaves API")
                 except Exception as e:
-                    logger.error(f"❌ Erro ao configurar OpenRouter: {e}")
+                    logger.error(f"❌ Erro ao configurar OpenRouter Grok: {e}")
 
-        # Gemini (Prioridade 2)
+        # OpenRouter Gemini 2.0 Flash Exp:free (Prioridade 2 - FALLBACK)
+        if HAS_OPENROUTER:
+            openrouter_keys = [
+                os.getenv("OPENROUTER_API_KEY"),
+                os.getenv("OPENROUTER_API_KEY_1"), 
+                os.getenv("OPENROUTER_API_KEY_2"),
+                os.getenv("OPENROUTER_API_KEY_3")
+            ]
+            openrouter_keys = [key for key in openrouter_keys if key]  # Remove None
+            
+            if openrouter_keys:
+                try:
+                    # Criar clientes para todas as chaves (reutilizando as mesmas)
+                    openrouter_clients = []
+                    for i, api_key in enumerate(openrouter_keys):
+                        client = openrouter_openai.OpenAI(
+                            api_key=api_key,
+                            base_url="https://openrouter.ai/api/v1"
+                        )
+                        openrouter_clients.append(client)
+                    
+                    self.providers["openrouter_gemini"] = {
+                        "clients": openrouter_clients,  # Lista de clientes
+                        "current_client_index": 0,  # Índice atual
+                        "model": "google/gemini-2.0-flash-exp:free",  # Gemini 2.0 Flash Exp FREE como fallback
+                        "available": True,  # Habilitado como fallback
+                        "supports_tools": True,
+                        "priority": 2,  # FALLBACK
+                        "total_keys": len(openrouter_keys),
+                        "max_tokens": None,  # SEM LIMITAÇÃO DE TOKENS
+                        "description": "Gemini 2.0 Flash Exp FREE - IA Fallback"
+                    }
+                    logger.info(f"✅ OpenRouter Gemini 2.0 Flash Exp:free configurado como FALLBACK com {len(openrouter_keys)} chaves API")
+                except Exception as e:
+                    logger.error(f"❌ Erro ao configurar OpenRouter Gemini: {e}")
+
+        # Gemini Direto (Prioridade 3 - Backup)
         if HAS_GEMINI:
             api_key = os.getenv("GEMINI_API_KEY")
             if api_key:
@@ -105,31 +143,35 @@ class EnhancedAIManager:
                     self.providers["gemini"] = {
                         "client": genai,
                         "model": "gemini-2.0-flash-exp",
-                        "available": False,  # Desabilitado - quota excedida
+                        "available": True,  # Habilitado como backup
                         "supports_tools": True,
-                        "priority": 5
+                        "priority": 3,
+                        "max_tokens": None,  # SEM LIMITAÇÃO DE TOKENS
+                        "description": "Gemini Direto - Backup"
                     }
-                    logger.info("✅ Gemini 2.0 Flash configurado")
+                    logger.info("✅ Gemini 2.0 Flash Direto configurado como backup")
                 except Exception as e:
                     logger.error(f"❌ Erro ao configurar Gemini: {e}")
 
-        # Groq (Prioridade 3 - fallback confiável) - ATUALIZADO PARA MODELO SUPORTADO
+        # Groq (Prioridade 4 - Desabilitado conforme solicitado)
         if HAS_GROQ:
             api_key = os.getenv("GROQ_API_KEY")
             if api_key:
                 try:
                     self.providers["groq"] = {
                         "client": Groq(api_key=api_key),
-                        "model": "llama3-70b-8192", # Modelo atualizado - veja a tabela de depreciações
-                        "available": True,
+                        "model": "llama3-70b-8192",
+                        "available": False,  # DESABILITADO conforme solicitado
                         "supports_tools": False,
-                        "priority": 1
+                        "priority": 4,
+                        "max_tokens": None,  # SEM LIMITAÇÃO DE TOKENS
+                        "description": "Groq - Desabilitado"
                     }
-                    logger.info("✅ Groq Llama configurado")
+                    logger.info("ℹ️ Groq configurado mas DESABILITADO")
                 except Exception as e:
                     logger.error(f"❌ Erro ao configurar Groq: {e}")
 
-        # OpenAI (Prioridade 4)
+        # OpenAI (Prioridade 5 - Último recurso)
         if HAS_OPENAI:
             api_key = os.getenv("OPENAI_API_KEY")
             if api_key:
@@ -137,11 +179,13 @@ class EnhancedAIManager:
                     self.providers["openai"] = {
                         "client": openai.OpenAI(api_key=api_key),
                         "model": "gpt-4o",
-                        "available": True, # Habilitado
+                        "available": True,
                         "supports_tools": True,
-                        "priority": 4
+                        "priority": 5,  # Último recurso
+                        "max_tokens": None,  # SEM LIMITAÇÃO DE TOKENS
+                        "description": "OpenAI GPT-4o - Último recurso"
                     }
-                    logger.info("✅ OpenAI GPT-4o configurado")
+                    logger.info("✅ OpenAI GPT-4o configurado como último recurso")
                 except Exception as e:
                     logger.error(f"❌ Erro ao configurar OpenAI: {e}")
 
@@ -200,14 +244,17 @@ class EnhancedAIManager:
         # Registrar tempo de início para garantir tempo mínimo
         start_time = datetime.now()
 
-        # Usar modelo preferido se especificado
-        if preferred_model == "qwen" and "openrouter" in self.providers and self.providers["openrouter"]["available"]:
-            provider_name = "openrouter"
-            logger.info(f"🎓 MODO ESPECIALIZAÇÃO: Usando {provider_name} com modelo Sonoma Sky Alpha")
-            logger.info(f"🔥 Configurado para análise PROFUNDA com 2M tokens context")
-        elif "openrouter" in self.providers and self.providers["openrouter"]["available"]:
-             provider_name = "openrouter"
-             logger.info(f"🤖 Usando {provider_name} com busca ativa (prioritário)")
+        # Usar modelo preferido ou selecionar automaticamente
+        if preferred_model == "grok" and "openrouter_grok" in self.providers and self.providers["openrouter_grok"]["available"]:
+            provider_name = "openrouter_grok"
+            logger.info(f"🚀 MODO GROK: Usando X-AI Grok-4-Fast:free como PRIMÁRIA")
+            logger.info(f"🔥 Configurado para análise ULTRA-PROFUNDA sem limitação de tokens")
+        elif "openrouter_grok" in self.providers and self.providers["openrouter_grok"]["available"]:
+            provider_name = "openrouter_grok"
+            logger.info(f"🚀 Usando X-AI Grok-4-Fast:free como IA PRIMÁRIA")
+        elif "openrouter_gemini" in self.providers and self.providers["openrouter_gemini"]["available"]:
+            provider_name = "openrouter_gemini"
+            logger.info(f"🔄 FALLBACK: Usando Gemini 2.0 Flash Exp:free")
         else:
             # Caso contrário, usa a lógica padrão
             provider_name = self._get_best_provider(require_tools=True)
@@ -235,20 +282,24 @@ IMPORTANTE: Gere uma análise completa mesmo sem ferramentas de busca, baseando-
 """
 
         try:
-            # Executa geração com ferramentas
-            if provider_name == "gemini":
+            # Executa geração com ferramentas baseado no provedor
+            if provider_name == "openrouter_grok":
+                return await self._generate_openrouter_with_tools(enhanced_prompt, max_search_iterations, session_id, "openrouter_grok")
+            elif provider_name == "openrouter_gemini":
+                return await self._generate_openrouter_with_tools(enhanced_prompt, max_search_iterations, session_id, "openrouter_gemini")
+            elif provider_name == "gemini":
                 return await self._generate_gemini_with_tools(enhanced_prompt, max_search_iterations, session_id)
             elif provider_name == "openai":
                 return await self._generate_openai_with_tools(enhanced_prompt, max_search_iterations, session_id)
             else:
-                # Para Qwen/OpenRouter - FORÇAR SAÍDA GRANDE para especialização
-                logger.info("🎓 Usando OpenRouter/Sonoma Sky Alpha para APRENDIZADO PROFUNDO")
-                return await self.generate_text(enhanced_prompt, max_tokens=20000, temperature=0.8)
+                # Para outros provedores - SEM LIMITAÇÃO DE TOKENS
+                logger.info(f"🎓 Usando {provider_name} para ANÁLISE PROFUNDA sem limitação de tokens")
+                return await self.generate_text(enhanced_prompt, max_tokens=None, temperature=0.8)
         except Exception as e:
             logger.error(f"❌ Erro com {provider_name}: {e}")
-            # Fallback para geração simples com Qwen/OpenRouter - TAMBÉM COM SAÍDA GRANDE
-            logger.info("🔄 Usando fallback para Qwen/OpenRouter com saída grande")
-            return await self.generate_text(enhanced_prompt, max_tokens=20000, temperature=0.8)
+            # Fallback para geração simples - SEM LIMITAÇÃO DE TOKENS
+            logger.info("🔄 Usando fallback sem limitação de tokens")
+            return await self.generate_text(enhanced_prompt, max_tokens=None, temperature=0.8)
 
     async def _generate_gemini_with_tools(
         self,
@@ -462,6 +513,149 @@ IMPORTANTE: Gere uma análise completa mesmo sem ferramentas de busca, baseando-
             logger.error(f"❌ Erro no OpenAI com ferramentas: {e}")
             raise
 
+    async def _generate_openrouter_with_tools(
+        self,
+        prompt: str,
+        max_iterations: int,
+        session_id: str = None,
+        provider_key: str = "openrouter_grok"
+    ) -> str:
+        """Gera com OpenRouter (Grok ou Gemini) usando ferramentas"""
+
+        try:
+            provider = self.providers[provider_key]
+            clients = provider["clients"]
+            current_index = provider["current_client_index"]
+            model = provider["model"]
+            
+            logger.info(f"🚀 Usando {provider['description']} - Modelo: {model}")
+
+            # Rotação de clientes OpenRouter
+            client = clients[current_index]
+            
+            # Define função de busca
+            tools = [{
+                "type": "function",
+                "function": {
+                    "name": "google_search",
+                    "description": "Busca informações atualizadas na internet sobre mercado brasileiro",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Termo de busca específico para o mercado brasileiro"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }]
+
+            messages = [{"role": "user", "content": prompt}]
+            iteration = 0
+
+            while iteration < max_iterations:
+                iteration += 1
+                logger.info(f"🔄 Iteração OpenRouter {iteration}/{max_iterations}")
+
+                try:
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        tools=tools,
+                        tool_choice="auto",
+                        max_tokens=None,  # SEM LIMITAÇÃO DE TOKENS
+                        temperature=0.8
+                    )
+
+                    message = response.choices[0].message
+
+                    # Verifica tool calls
+                    if hasattr(message, "tool_calls") and message.tool_calls:
+                        tool_call = message.tool_calls[0]
+
+                        if tool_call.function.name == "google_search":
+                            args = json.loads(tool_call.function.arguments)
+                            search_query = args.get("query", "")
+
+                            logger.info(f"🔍 IA {provider['description']} solicitou busca: {search_query}")
+
+                            # Executa busca real
+                            search_results = await self._execute_real_search(search_query, session_id)
+
+                            # Adiciona à conversa
+                            messages.append({
+                                "role": "assistant",
+                                "tool_calls": [{
+                                    "id": tool_call.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": "google_search",
+                                        "arguments": tool_call.function.arguments
+                                    }
+                                }]
+                            })
+
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": search_results
+                            })
+
+                            continue
+
+                    # Resposta final
+                    final_response = message.content
+                    logger.info(f"✅ {provider['description']} geração concluída em {iteration} iterações")
+                    
+                    # Atualiza índice para próxima chamada (rotação)
+                    provider["current_client_index"] = (current_index + 1) % len(clients)
+                    
+                    return final_response
+
+                except Exception as e:
+                    error_msg = str(e)
+                    if "429" in error_msg or "quota" in error_msg.lower() or "rate_limit" in error_msg.lower():
+                        logger.warning(f"⚠️ {provider['description']} rate limit, tentando próxima chave")
+                        
+                        # Tenta próxima chave
+                        provider["current_client_index"] = (current_index + 1) % len(clients)
+                        
+                        # Se já tentou todas as chaves, marca como indisponível temporariamente
+                        if provider["current_client_index"] == current_index:
+                            logger.error(f"❌ Todas as chaves {provider['description']} esgotadas")
+                            provider["available"] = False
+                            
+                            # Tenta fallback para outro provedor
+                            if provider_key == "openrouter_grok" and "openrouter_gemini" in self.providers:
+                                logger.info("🔄 Fallback: Grok → Gemini")
+                                return await self._generate_openrouter_with_tools(prompt, max_iterations, session_id, "openrouter_gemini")
+                            elif provider_key == "openrouter_gemini" and "gemini" in self.providers:
+                                logger.info("🔄 Fallback: OpenRouter Gemini → Gemini Direto")
+                                return await self._generate_gemini_with_tools(prompt, max_iterations, session_id)
+                            
+                            raise Exception(f"Todos os provedores OpenRouter esgotados")
+                        
+                        continue
+                    else:
+                        logger.error(f"❌ Erro {provider['description']}: {e}")
+                        break
+
+            # Se chegou ao limite de iterações
+            logger.warning(f"⚠️ Limite de iterações atingido ({max_iterations}) para {provider['description']}")
+            return f"Análise realizada com {provider['description']} e busca ativa."
+
+        except Exception as e:
+            logger.error(f"❌ Erro no {provider_key} com ferramentas: {e}")
+            
+            # Fallback automático
+            if provider_key == "openrouter_grok" and "openrouter_gemini" in self.providers:
+                logger.info("🔄 Fallback automático: Grok → Gemini")
+                return await self._generate_openrouter_with_tools(prompt, max_iterations, session_id, "openrouter_gemini")
+            
+            raise
+
     async def _execute_real_search(self, search_query: str, session_id: str = None) -> str:
         """Executa busca real usando o orquestrador"""
 
@@ -546,9 +740,9 @@ Fontes encontradas: {total_sources}
 
         return formatted
 
-    # Método dummy para 'generate_text' caso seja chamado sem provedor com tools
-    async def generate_text(self, prompt: str, max_tokens: int = 50000, temperature: float = 0.7) -> str:
-        """Gera texto usando o melhor provedor disponível"""
+    # Método para 'generate_text' - SEM LIMITAÇÃO DE TOKENS
+    async def generate_text(self, prompt: str, max_tokens: int = None, temperature: float = 0.7) -> str:
+        """Gera texto usando o melhor provedor disponível - SEM LIMITAÇÃO DE TOKENS"""
         provider_name = self._get_best_provider(require_tools=False)
 
         if not provider_name:
@@ -556,78 +750,129 @@ Fontes encontradas: {total_sources}
             return "Erro: Nenhum provedor de IA disponível para gerar texto."
 
         provider = self.providers[provider_name]
-        logger.info(f"🤖 Usando {provider_name} para geração de texto")
+        logger.info(f"🚀 Usando {provider_name} para geração de texto SEM LIMITAÇÃO DE TOKENS")
 
         try:
-            if provider_name == "openrouter":
-                # Rotação de chaves API
+            # OpenRouter Grok (Primária)
+            if provider_name == "openrouter_grok":
                 clients = provider["clients"]
                 current_index = provider["current_client_index"]
                 total_keys = provider["total_keys"]
                 
-                logger.info(f"🔥 FORÇANDO SAÍDA GRANDE: max_tokens={max_tokens}, temp={temperature}")
+                logger.info(f"🚀 X-AI GROK-4-FAST: SEM limitação de tokens, temp={temperature}")
                 logger.info(f"📊 Modelo: {provider['model']}")
                 logger.info(f"📝 Prompt size: {len(prompt)} chars")
                 logger.info(f"🔄 Usando chave API {current_index + 1}/{total_keys}")
                 
-                # Tenta com a chave atual
                 for attempt in range(total_keys):
                     try:
                         client = clients[current_index]
                         response = client.chat.completions.create(
                             model=provider["model"],
                             messages=[{"role": "user", "content": prompt}],
-                            max_tokens=max_tokens,
+                            max_tokens=max_tokens,  # None = sem limitação
                             temperature=temperature
                         )
                         
                         result = response.choices[0].message.content
-                        logger.info(f"✅ Resposta gerada: {len(result)} chars, {len(result.split())} palavras")
+                        logger.info(f"✅ Grok resposta gerada: {len(result)} chars, {len(result.split())} palavras")
                         return result
                         
                     except Exception as e:
-                        logger.warning(f"⚠️ Erro com chave {current_index + 1}: {e}")
-                        # Rotaciona para próxima chave
+                        logger.warning(f"⚠️ Erro Grok chave {current_index + 1}: {e}")
                         current_index = (current_index + 1) % total_keys
                         provider["current_client_index"] = current_index
-                        logger.info(f"🔄 Rotacionando para chave {current_index + 1}/{total_keys}")
                         
-                        if attempt == total_keys - 1:  # Última tentativa
+                        if attempt == total_keys - 1:
+                            logger.error("❌ Todas as chaves Grok falharam, tentando fallback")
                             raise e
 
+            # OpenRouter Gemini (Fallback)
+            elif provider_name == "openrouter_gemini":
+                clients = provider["clients"]
+                current_index = provider["current_client_index"]
+                total_keys = provider["total_keys"]
+                
+                logger.info(f"🔄 GEMINI FALLBACK: SEM limitação de tokens, temp={temperature}")
+                logger.info(f"📊 Modelo: {provider['model']}")
+                logger.info(f"🔄 Usando chave API {current_index + 1}/{total_keys}")
+                
+                for attempt in range(total_keys):
+                    try:
+                        client = clients[current_index]
+                        response = client.chat.completions.create(
+                            model=provider["model"],
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=max_tokens,  # None = sem limitação
+                            temperature=temperature
+                        )
+                        
+                        result = response.choices[0].message.content
+                        logger.info(f"✅ Gemini OpenRouter resposta: {len(result)} chars, {len(result.split())} palavras")
+                        return result
+                        
+                    except Exception as e:
+                        logger.warning(f"⚠️ Erro Gemini OpenRouter chave {current_index + 1}: {e}")
+                        current_index = (current_index + 1) % total_keys
+                        provider["current_client_index"] = current_index
+                        
+                        if attempt == total_keys - 1:
+                            raise e
+
+            # Gemini Direto (Backup)
             elif provider_name == "gemini":
                 model = genai.GenerativeModel("gemini-2.0-flash-exp")
+                
+                # Configuração sem limitação de tokens
+                generation_config = genai.types.GenerationConfig(
+                    temperature=temperature,
+                )
+                
+                # Só define max_output_tokens se especificado
+                if max_tokens is not None:
+                    generation_config.max_output_tokens = max_tokens
+                
+                logger.info(f"🔄 GEMINI DIRETO: SEM limitação de tokens, temp={temperature}")
+                
                 response = model.generate_content(
                     prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        max_output_tokens=max_tokens,
-                        temperature=temperature,
-                    )
+                    generation_config=generation_config
                 )
-                return response.text
+                result = response.text
+                logger.info(f"✅ Gemini Direto resposta: {len(result)} chars, {len(result.split())} palavras")
+                return result
 
+            # Groq (Desabilitado mas mantido para compatibilidade)
             elif provider_name == "groq":
                 client = provider["client"]
+                logger.info(f"🔄 GROQ: SEM limitação de tokens, temp={temperature}")
+                
                 response = client.chat.completions.create(
                     model=provider["model"],
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=max_tokens,
+                    max_tokens=max_tokens,  # None = sem limitação
                     temperature=temperature
                 )
-                return response.choices[0].message.content
+                
+                result = response.choices[0].message.content
+                logger.info(f"✅ Groq resposta: {len(result)} chars, {len(result.split())} palavras")
+                return result
 
-            elif provider_name == "openai":
-                client = provider["client"]
-                response = client.chat.completions.create(
-                    model=provider["model"],
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=max_tokens,
-                    temperature=temperature
-                )
-                return response.choices[0].message.content
+            # OpenAI removido conforme solicitado - não está sendo usado
 
         except Exception as e:
             logger.error(f"❌ Erro na geração de texto com {provider_name}: {e}")
+            
+            # Fallback automático para próximo provedor disponível
+            if provider_name == "openrouter_grok":
+                logger.info("🔄 Fallback automático: Grok → Gemini OpenRouter")
+                if "openrouter_gemini" in self.providers and self.providers["openrouter_gemini"]["available"]:
+                    return await self.generate_text(prompt, max_tokens, temperature)
+            elif provider_name == "openrouter_gemini":
+                logger.info("🔄 Fallback automático: Gemini OpenRouter → Gemini Direto")
+                if "gemini" in self.providers and self.providers["gemini"]["available"]:
+                    return await self.generate_text(prompt, max_tokens, temperature)
+            
             return f"Erro na geração: {str(e)}"
 
         return "Erro: Método de geração não implementado para este provedor"

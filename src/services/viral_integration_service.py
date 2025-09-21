@@ -1312,68 +1312,79 @@ class ViralImageFinder:
             api_key = self._get_next_api_key('apify')
             if not api_key:
                 break
-            # URL corrigida para a nova API do Apify
-            apify_url = f"https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items"
-            # Parâmetros corrigidos para o formato esperado pela nova API
-            params = {
-                'token': api_key,
-                'directUrls': json.dumps([post_url]),  # Usar json.dumps para formato correto
+            # URL corrigida para usar método assíncrono mais eficiente
+            apify_url = f"https://api.apify.com/v2/acts/apify~instagram-scraper/runs"
+            # Headers corretos para autenticação
+            headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            }
+            # Input data correto para o actor
+            input_data = {
+                'directUrls': [post_url],  # Array direto, não JSON string
                 'resultsLimit': 1,
-                'resultsType': 'posts'
+                'resultsType': 'posts',
+                'maxRequestRetries': 1,  # Reduzir tentativas para ser mais rápido
+                'timeout': 30  # Timeout interno do actor
             }
             # Obter índice atual antes da tentativa para marcar falha corretamente
             current_index = (self.current_api_index['apify'] - 1) % len(self.api_keys['apify'])
             try:
                 if HAS_ASYNC_DEPS:
                     timeout = aiohttp.ClientTimeout(total=30)
-                    async with aiohttp.ClientSession(timeout=timeout) as session:
-                        async with session.get(apify_url, params=params) as response:
-                            # Status 200 (OK) e 201 (Created) são ambos sucessos
-                            if response.status in [200, 201]:
-                                data = await response.json()
-                                if data and len(data) > 0:
-                                    post_data = data[0]
-                                    logger.info(f"✅ Apify API #{current_index + 1} funcionou para {post_url} (Status: {response.status})")
-                                    return {
-                                        'engagement_score': float(post_data.get('likesCount', 0) + post_data.get('commentsCount', 0) * 3),
-                                        'views_estimate': post_data.get('videoViewCount', 0) or post_data.get('likesCount', 0) * 10,
-                                        'likes_estimate': post_data.get('likesCount', 0),
-                                        'comments_estimate': post_data.get('commentsCount', 0),
-                                        'shares_estimate': post_data.get('commentsCount', 0) // 2,
-                                        'author': post_data.get('ownerUsername', ''),
-                                        'author_followers': post_data.get('ownerFollowersCount', 0),
-                                        'post_date': post_data.get('timestamp', ''),
-                                        'hashtags': [tag.get('name', '') for tag in post_data.get('hashtags', [])]
-                                    }
-                                else:
-                                    logger.warning(f"Apify API #{current_index + 1} retornou dados vazios para {post_url}")
-                                    raise Exception("Dados vazios retornados")
+                    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                        # Iniciar o run
+                        async with session.post(apify_url, json=input_data) as response:
+                            if response.status == 201:
+                                run_data = await response.json()
+                                run_id = run_data.get('data', {}).get('id')
+                                if not run_id:
+                                    raise Exception("Run ID não encontrado")
+                                
+                                # Aguardar conclusão (máximo 30s)
+                                for wait_attempt in range(6):  # 6 tentativas de 5s = 30s
+                                    await asyncio.sleep(5)
+                                    status_url = f"https://api.apify.com/v2/acts/apify~instagram-scraper/runs/{run_id}"
+                                    async with session.get(status_url) as status_response:
+                                        if status_response.status == 200:
+                                            status_data = await status_response.json()
+                                            run_status = status_data.get('data', {}).get('status')
+                                            
+                                            if run_status == 'SUCCEEDED':
+                                                # Obter dataset
+                                                dataset_url = f"https://api.apify.com/v2/acts/apify~instagram-scraper/runs/{run_id}/dataset/items"
+                                                async with session.get(dataset_url) as dataset_response:
+                                                    if dataset_response.status == 200:
+                                                        items = await dataset_response.json()
+                                                        if items and len(items) > 0:
+                                                            post_data = items[0]
+                                                            logger.info(f"✅ Apify API #{current_index + 1} funcionou para {post_url}")
+                                                            return {
+                                                                'engagement_score': float(post_data.get('likesCount', 0) + post_data.get('commentsCount', 0) * 3),
+                                                                'views_estimate': post_data.get('videoViewCount', 0) or post_data.get('likesCount', 0) * 10,
+                                                                'likes_estimate': post_data.get('likesCount', 0),
+                                                                'comments_estimate': post_data.get('commentsCount', 0),
+                                                                'shares_estimate': post_data.get('commentsCount', 0) // 2,
+                                                                'author': post_data.get('ownerUsername', ''),
+                                                                'author_followers': post_data.get('ownerFollowersCount', 0),
+                                                                'post_date': post_data.get('timestamp', ''),
+                                                                'hashtags': [tag.get('name', '') for tag in post_data.get('hashtags', [])]
+                                                            }
+                                                        else:
+                                                            raise Exception("Dataset vazio")
+                                                    else:
+                                                        raise Exception(f"Erro dataset: {dataset_response.status}")
+                                                break
+                                            elif run_status in ['FAILED', 'ABORTED', 'TIMED-OUT']:
+                                                raise Exception(f"Run falhou: {run_status}")
+                                
+                                raise Exception("Timeout aguardando resultado")
                             else:
                                 raise Exception(f"Status {response.status}")
                 else:
-                    response = self.session.get(apify_url, params=params, timeout=30)
-                    # Status 200 (OK) e 201 (Created) são ambos sucessos
-                    if response.status_code in [200, 201]:
-                        data = response.json()
-                        if data and len(data) > 0:
-                            post_data = data[0]
-                            logger.info(f"✅ Apify API #{current_index + 1} funcionou para {post_url} (Status: {response.status_code})")
-                            return {
-                                'engagement_score': float(post_data.get('likesCount', 0) + post_data.get('commentsCount', 0) * 3),
-                                'views_estimate': post_data.get('videoViewCount', 0) or post_data.get('likesCount', 0) * 10,
-                                'likes_estimate': post_data.get('likesCount', 0),
-                                'comments_estimate': post_data.get('commentsCount', 0),
-                                'shares_estimate': post_data.get('commentsCount', 0) // 2,
-                                'author': post_data.get('ownerUsername', ''),
-                                'author_followers': post_data.get('ownerFollowersCount', 0),
-                                'post_date': post_data.get('timestamp', ''),
-                                'hashtags': [tag.get('name', '') for tag in post_data.get('hashtags', [])]
-                            }
-                        else:
-                            logger.warning(f"Apify API #{current_index + 1} retornou dados vazios para {post_url}")
-                            raise Exception("Dados vazios retornados")
-                    else:
-                        raise Exception(f"Status {response.status_code}")
+                    # Versão síncrona simplificada - usar fallback direto
+                    logger.warning(f"Apify requer async - usando fallback para {post_url}")
+                    raise Exception("Apify requer async")
             except Exception as e:
                 self._mark_api_failed('apify', current_index)
                 logger.warning(f"❌ Apify API #{current_index + 1} falhou: {e}")

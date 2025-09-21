@@ -350,6 +350,7 @@ class MassiveSearchEngine:
                 'modulos_analises': [],
                 'jsons_gigantes': [],
                 'resultados_virais': [],
+                'trechos_pesquisa_web': [],  # Chave ausente adicionada
                 'metadata_consolidacao': {
                     'timestamp_consolidacao': datetime.now().isoformat(),
                     'session_id': session_id,

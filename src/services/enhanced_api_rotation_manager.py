@@ -189,23 +189,21 @@ class EnhancedAPIRotationManager:
                     ))
                     logger.info(f"✅ EXA API {i} carregada")
             
-            # Serper - Substituto secundário - TODAS as chaves do .env
-            serper_keys = [
-                os.getenv('SERPER_API_KEY'),
-                os.getenv('SERPER_API_KEY_1'),
-                os.getenv('SERPER_API_KEY_2'),
-                os.getenv('SERPER_API_KEY_3')
-            ]
-            
-            for i, key in enumerate(serper_keys, 1):
-                if key and key.strip():
+            # Serper - Apenas chaves válidas (testadas em 2025-09-21)
+            # ✅ Usando apenas a chave principal que tem créditos
+            serper_key = os.getenv('SERPER_API_KEY')
+            if serper_key and serper_key.strip():
+                # Verifica se a chave tem créditos antes de adicionar
+                if self._test_serper_key(serper_key):
                     self.apis['serper'].append(APIEndpoint(
-                        name=f"serper_{i}",
-                        api_key=key,
+                        name="serper_main",
+                        api_key=serper_key,
                         base_url="https://google.serper.dev",
                         max_requests_per_minute=100
                     ))
-                    logger.info(f"✅ Serper API {i} carregada")
+                    logger.info("✅ Serper API principal carregada e validada")
+                else:
+                    logger.warning("⚠️ Serper API principal sem créditos - removida da rotação")
             
             # SerpAPI - Nova adição para busca Google
             serpapi_keys = [
@@ -362,6 +360,37 @@ class EnhancedAPIRotationManager:
         for service in self.apis:
             self.last_health_check[service] = datetime.now() - timedelta(minutes=10)
     
+    def _test_serper_key(self, api_key: str) -> bool:
+        """
+        Testa se uma chave Serper tem créditos disponíveis
+        Retorna True se a chave funciona, False caso contrário
+        """
+        try:
+            response = requests.post(
+                'https://google.serper.dev/search',
+                headers={'X-API-KEY': api_key, 'Content-Type': 'application/json'},
+                json={'q': 'test'},
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"✅ Chave Serper validada com sucesso")
+                return True
+            elif response.status_code == 400:
+                error_msg = response.text
+                if "Not enough credits" in error_msg:
+                    logger.warning(f"❌ Chave Serper sem créditos: {error_msg}")
+                else:
+                    logger.warning(f"❌ Chave Serper inválida: {error_msg}")
+                return False
+            else:
+                logger.warning(f"❌ Chave Serper erro {response.status_code}: {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Erro ao testar chave Serper: {str(e)}")
+            return False
+    
     def get_active_api(self, service: str, force_check: bool = False) -> Optional[APIEndpoint]:
         """
         Retorna API ativa para o serviço especificado com rotação automática
@@ -457,11 +486,28 @@ class EnhancedAPIRotationManager:
                 if api.name == api_name:
                     api.error_count += 1
                     
-                    # Rotação IMEDIATA na primeira falha para garantir disponibilidade
-                    api.status = APIStatus.ERROR
-                    logger.warning(f"⚠️ API {api_name} marcada como ERROR - ROTAÇÃO IMEDIATA")
+                    # ROTAÇÃO INTELIGENTE: Diferentes estratégias baseadas no tipo de erro
+                    error_str = str(error).lower()
                     
-                    # Forçar rotação para próxima API disponível
+                    if "rate limit" in error_str or "429" in error_str:
+                        # Rate limit: marcar como rate limited por 1 minuto
+                        api.status = APIStatus.RATE_LIMITED
+                        api.rate_limit_reset = datetime.now() + timedelta(minutes=1)
+                        logger.warning(f"⚠️ API {api_name} rate limited - aguardando 1 minuto")
+                    elif "credits" in error_str or "quota" in error_str or "billing" in error_str:
+                        # Sem créditos: marcar como offline permanentemente
+                        api.status = APIStatus.OFFLINE
+                        logger.error(f"❌ API {api_name} sem créditos - marcada como OFFLINE")
+                    elif "401" in error_str or "403" in error_str or "unauthorized" in error_str:
+                        # Erro de autenticação: marcar como offline
+                        api.status = APIStatus.OFFLINE
+                        logger.error(f"❌ API {api_name} erro de autenticação - marcada como OFFLINE")
+                    else:
+                        # Erro temporário: marcar como erro mas permitir retry
+                        api.status = APIStatus.ERROR
+                        logger.warning(f"⚠️ API {api_name} erro temporário - tentará novamente")
+                    
+                    # Forçar rotação IMEDIATA para próxima API disponível
                     if len(self.apis[service]) > 1:
                         # Encontrar próxima API ativa
                         next_api_found = False
@@ -551,6 +597,96 @@ class EnhancedAPIRotationManager:
         
         # Se falhou, tentar fallback
         return self.get_fallback_api(service_type)
+    
+    def get_best_api_for_load_balancing(self, service: str) -> Optional[APIEndpoint]:
+        """
+        NOVO: Balanceamento de carga inteligente
+        Seleciona a API com menor carga atual para distribuir requisições
+        """
+        with self.lock:
+            if service not in self.apis or not self.apis[service]:
+                return None
+            
+            available_apis = [api for api in self.apis[service] if self._is_api_available(api)]
+            
+            if not available_apis:
+                logger.warning(f"⚠️ Nenhuma API disponível para balanceamento em {service}")
+                return None
+            
+            # Calcular score de carga para cada API (menor é melhor)
+            def calculate_load_score(api: APIEndpoint) -> float:
+                score = 0.0
+                
+                # Penalizar por número de requisições recentes
+                score += api.requests_made * 0.1
+                
+                # Penalizar por erros recentes
+                score += api.error_count * 0.5
+                
+                # Bonificar APIs que não foram usadas recentemente
+                if api.last_used:
+                    minutes_since_use = (datetime.now() - api.last_used).total_seconds() / 60
+                    score -= minutes_since_use * 0.05  # Bonus por descanso
+                
+                # Penalizar se está próximo do rate limit
+                if api.requests_made > (api.max_requests_per_minute * 0.8):
+                    score += 2.0  # Penalidade alta se próximo do limite
+                
+                return score
+            
+            # Selecionar API com menor score (menor carga)
+            best_api = min(available_apis, key=calculate_load_score)
+            
+            # Atualizar estatísticas
+            best_api.last_used = datetime.now()
+            best_api.requests_made += 1
+            
+            # Atualizar índice atual para essa API
+            for i, api in enumerate(self.apis[service]):
+                if api.name == best_api.name:
+                    self.current_api_index[service] = i
+                    break
+            
+            logger.info(f"⚖️ Balanceamento: {best_api.name} selecionada para {service} (carga: {calculate_load_score(best_api):.2f})")
+            return best_api
+    
+    def get_api_statistics(self, service: str = None) -> Dict[str, Any]:
+        """
+        NOVO: Retorna estatísticas detalhadas das APIs
+        """
+        stats = {}
+        
+        services_to_check = [service] if service else self.apis.keys()
+        
+        for svc in services_to_check:
+            if svc not in self.apis:
+                continue
+                
+            svc_stats = {
+                'total_apis': len(self.apis[svc]),
+                'active_apis': len([api for api in self.apis[svc] if api.status == APIStatus.ACTIVE]),
+                'rate_limited_apis': len([api for api in self.apis[svc] if api.status == APIStatus.RATE_LIMITED]),
+                'error_apis': len([api for api in self.apis[svc] if api.status == APIStatus.ERROR]),
+                'offline_apis': len([api for api in self.apis[svc] if api.status == APIStatus.OFFLINE]),
+                'total_requests': sum(api.requests_made for api in self.apis[svc]),
+                'total_errors': sum(api.error_count for api in self.apis[svc]),
+                'apis_detail': []
+            }
+            
+            for api in self.apis[svc]:
+                api_detail = {
+                    'name': api.name,
+                    'status': api.status.value,
+                    'requests_made': api.requests_made,
+                    'error_count': api.error_count,
+                    'last_used': api.last_used.isoformat() if api.last_used else None,
+                    'rate_limit_reset': api.rate_limit_reset.isoformat() if api.rate_limit_reset else None
+                }
+                svc_stats['apis_detail'].append(api_detail)
+            
+            stats[svc] = svc_stats
+        
+        return stats
     
     def get_fallback_model(self, model_name: str) -> tuple[str, Optional[APIEndpoint]]:
         """

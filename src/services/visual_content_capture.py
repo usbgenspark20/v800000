@@ -220,6 +220,24 @@ class VisualContentCapture:
                 content_type = response.headers.get('content-type', '').lower()
                 logger.info(f"📄 Content-Type: {content_type}")
                 
+                # CORREÇÃO: Verifica se está recebendo HTML em vez de imagem
+                if 'text/html' in content_type or 'text/plain' in content_type:
+                    logger.warning(f"⚠️ Recebendo HTML/texto em vez de imagem: {content_type}")
+                    # Lê uma pequena amostra para confirmar
+                    sample = response.content[:500].decode('utf-8', errors='ignore').lower()
+                    if '<html' in sample or '<!doctype' in sample or '<body' in sample:
+                        logger.warning(f"⚠️ Confirmado: resposta é HTML, não imagem. Pulando...")
+                        continue  # Tenta próxima tentativa
+                
+                # Verifica se Content-Type é de imagem válida
+                valid_image_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml']
+                if not any(img_type in content_type for img_type in valid_image_types):
+                    logger.warning(f"⚠️ Content-Type não é de imagem válida: {content_type}")
+                    # Se não tem Content-Type de imagem, verifica pela URL
+                    if not any(ext in image_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif']):
+                        logger.warning(f"⚠️ URL também não parece ser de imagem. Pulando...")
+                        continue
+                
                 # Determina extensão baseada no Content-Type e URL
                 extension = '.jpg'  # Default
                 if 'jpeg' in content_type or 'jpg' in content_type:
@@ -264,6 +282,13 @@ class VisualContentCapture:
                             with open(image_path, 'rb') as f:
                                 header = f.read(50)
                                 
+                            # CORREÇÃO: Verifica primeiro se é HTML
+                            header_text = header.decode('utf-8', errors='ignore').lower()
+                            if '<html' in header_text or '<!doctype' in header_text or '<body' in header_text:
+                                logger.warning(f"⚠️ Arquivo baixado é HTML, não imagem!")
+                                image_path.unlink()  # Remove arquivo inválido
+                                continue  # Tenta próxima tentativa
+                            
                             # Assinaturas de arquivos de imagem
                             image_signatures = [
                                 b'\xff\xd8\xff',  # JPEG
@@ -271,6 +296,8 @@ class VisualContentCapture:
                                 b'GIF8',  # GIF
                                 b'RIFF',  # WebP (starts with RIFF)
                                 b'<svg',  # SVG
+                                b'BM',    # BMP
+                                b'\x00\x00\x01\x00',  # ICO
                             ]
                             
                             is_valid_image = any(header.startswith(sig) for sig in image_signatures)
@@ -279,7 +306,8 @@ class VisualContentCapture:
                                 logger.info(f"✅ DOWNLOAD SUCESSO: {image_path} ({file_size:,} bytes)")
                                 return True
                             else:
-                                logger.warning(f"⚠️ Arquivo não parece ser uma imagem válida")
+                                logger.warning(f"⚠️ Arquivo não parece ser uma imagem válida (assinatura não reconhecida)")
+                                logger.info(f"🔍 Primeiros bytes: {header[:20]}")
                                 image_path.unlink()  # Remove arquivo inválido
                         except Exception as e:
                             logger.warning(f"⚠️ Erro na validação da imagem: {e}")
@@ -328,6 +356,38 @@ class VisualContentCapture:
             chrome_options.add_argument("--disable-plugins")
             chrome_options.add_argument("--disable-images")  # Para economizar banda
             chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+            
+            # Correções para erros específicos de GPU, WebGL e GCM
+            chrome_options.add_argument("--disable-webgl")
+            chrome_options.add_argument("--disable-webgl2")
+            chrome_options.add_argument("--disable-3d-apis")
+            chrome_options.add_argument("--disable-accelerated-2d-canvas")
+            chrome_options.add_argument("--disable-accelerated-jpeg-decoding")
+            chrome_options.add_argument("--disable-accelerated-mjpeg-decode")
+            chrome_options.add_argument("--disable-accelerated-video-decode")
+            chrome_options.add_argument("--disable-accelerated-video-encode")
+            chrome_options.add_argument("--disable-gpu-sandbox")
+            chrome_options.add_argument("--disable-software-rasterizer")
+            chrome_options.add_argument("--disable-background-timer-throttling")
+            chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+            chrome_options.add_argument("--disable-renderer-backgrounding")
+            chrome_options.add_argument("--disable-features=TranslateUI,BlinkGenPropertyTrees")
+            chrome_options.add_argument("--disable-ipc-flooding-protection")
+            chrome_options.add_argument("--disable-default-apps")
+            chrome_options.add_argument("--disable-sync")
+            chrome_options.add_argument("--disable-background-networking")
+            chrome_options.add_argument("--disable-component-update")
+            chrome_options.add_argument("--disable-client-side-phishing-detection")
+            chrome_options.add_argument("--disable-hang-monitor")
+            chrome_options.add_argument("--disable-popup-blocking")
+            chrome_options.add_argument("--disable-prompt-on-repost")
+            chrome_options.add_argument("--disable-domain-reliability")
+            chrome_options.add_argument("--disable-component-extensions-with-background-pages")
+            chrome_options.add_argument("--no-first-run")
+            chrome_options.add_argument("--no-default-browser-check")
+            chrome_options.add_argument("--no-pings")
+            chrome_options.add_argument("--no-zygote")
+            chrome_options.add_argument("--single-process")  # Força processo único para evitar problemas de GPU
             
             # Usa selenium_checker para configuração robusta
             from .selenium_checker import selenium_checker
@@ -546,7 +606,13 @@ class VisualContentCapture:
         """
         logger.info(f"🎯 Selecionando top {max_urls} URLs mais relevantes")
         
-        all_urls = all_results.get('consolidated_urls', [])
+        # Verifica se all_results é um dicionário ou lista
+        if isinstance(all_results, dict):
+            all_urls = all_results.get('consolidated_urls', [])
+        elif isinstance(all_results, list):
+            all_urls = all_results
+        else:
+            all_urls = []
         
         if not all_urls:
             logger.warning("⚠️ Nenhuma URL encontrada nos resultados")

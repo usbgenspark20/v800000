@@ -58,7 +58,7 @@ class EnvironmentLoader:
     def _set_default_values(self):
         """Define valores padrão para variáveis de ambiente"""
         defaults = {
-            'FLASK_ENV': 'development',
+            'FLASK_ENV': 'production',  # CORREÇÃO: Padrão para produção
             'HOST': '0.0.0.0',
             'PORT': '5000',
             'CORS_ORIGINS': '*',

@@ -320,6 +320,38 @@ class ViralContentAnalyzer:
             chrome_options.add_argument("--disable-plugins")
             chrome_options.add_argument(f"--window-size={self.screenshot_config['width']},{self.screenshot_config['height']}")
             chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+            
+            # Correções para erros específicos de GPU, WebGL e GCM
+            chrome_options.add_argument("--disable-webgl")
+            chrome_options.add_argument("--disable-webgl2")
+            chrome_options.add_argument("--disable-3d-apis")
+            chrome_options.add_argument("--disable-accelerated-2d-canvas")
+            chrome_options.add_argument("--disable-accelerated-jpeg-decoding")
+            chrome_options.add_argument("--disable-accelerated-mjpeg-decode")
+            chrome_options.add_argument("--disable-accelerated-video-decode")
+            chrome_options.add_argument("--disable-accelerated-video-encode")
+            chrome_options.add_argument("--disable-gpu-sandbox")
+            chrome_options.add_argument("--disable-software-rasterizer")
+            chrome_options.add_argument("--disable-background-timer-throttling")
+            chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+            chrome_options.add_argument("--disable-renderer-backgrounding")
+            chrome_options.add_argument("--disable-features=TranslateUI,BlinkGenPropertyTrees")
+            chrome_options.add_argument("--disable-ipc-flooding-protection")
+            chrome_options.add_argument("--disable-default-apps")
+            chrome_options.add_argument("--disable-sync")
+            chrome_options.add_argument("--disable-background-networking")
+            chrome_options.add_argument("--disable-component-update")
+            chrome_options.add_argument("--disable-client-side-phishing-detection")
+            chrome_options.add_argument("--disable-hang-monitor")
+            chrome_options.add_argument("--disable-popup-blocking")
+            chrome_options.add_argument("--disable-prompt-on-repost")
+            chrome_options.add_argument("--disable-domain-reliability")
+            chrome_options.add_argument("--disable-component-extensions-with-background-pages")
+            chrome_options.add_argument("--no-first-run")
+            chrome_options.add_argument("--no-default-browser-check")
+            chrome_options.add_argument("--no-pings")
+            chrome_options.add_argument("--no-zygote")
+            chrome_options.add_argument("--single-process")  # Força processo único para evitar problemas de GPU
 
             # Configuração otimizada para Replit
             try:

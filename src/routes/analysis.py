@@ -9,6 +9,7 @@ import logging
 import time
 import uuid
 import random
+import os
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 
@@ -400,8 +401,11 @@ def start_analysis():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(
-                ai_synthesis_engine.analyze_and_synthesize(session_id)
+            result = ai_synthesis_engine.analyze_and_synthesize(
+                session_id=session_id,
+                model="gemini-2.0-flash-exp",
+                api_key=os.getenv('GEMINI_API_KEY'),
+                analysis_time=30
             )
         finally:
             loop.close()
@@ -517,8 +521,11 @@ def analyze_data_endpoint():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(
-                enhanced_synthesis_engine.analyze_and_synthesize(session_id)
+            result = enhanced_synthesis_engine.analyze_and_synthesize(
+                session_id=session_id,
+                model="gemini-2.0-flash-exp",
+                api_key=os.getenv('GEMINI_API_KEY'),
+                analysis_time=30
             )
         finally:
             loop.close()
